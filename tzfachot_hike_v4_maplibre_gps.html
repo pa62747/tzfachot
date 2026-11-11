@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>טיול להר צפחות - תלת מימד (ללא מפתח API)</title>
+    
+    <!-- MapLibre GL JS -->
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    
+    <!-- proj4 - המרה מרשת ישראל החדשה (ITM, EPSG:2039) ל-WGS84 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root { --primary-color: #2c3e50; --accent-color: #3498db; --bg-color: #f8f9fa; }
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; background-color: var(--bg-color); }
+        .app-container { display: grid; grid-template-columns: 1fr 350px; grid-template-rows: 60px 1fr 160px; height: 100vh; width: 100vw; }
+        header { grid-column: 1 / 3; grid-row: 1 / 2; background-color: var(--primary-color); color: white; display: flex; align-items: center; padding: 0 20px; font-size: 24px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 10; }
+        #map { grid-column: 1 / 2; grid-row: 2 / 3; z-index: 1; position: relative; }
+        
+        .map-overlay { position: absolute; top: 10px; left: 10px; background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 4px; z-index: 5; box-shadow: 0 1px 4px rgba(0,0,0,0.3); font-size: 14px; }
+        .map-overlay select, .map-overlay button { margin-top: 5px; padding: 5px; width: 100%; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-family: inherit;}
+        .map-overlay button { background: var(--primary-color); color: white; border: none; font-weight: bold;}
+        .map-overlay button:hover { background: var(--accent-color); }
+        .map-overlay button:disabled { opacity: .65; cursor: wait; }
+        #gpsStatus { margin-top: 8px; max-width: 220px; line-height: 1.4; font-size: 12px; color: #34495e; }
+        .user-location-marker {
+            width: 18px; height: 18px; border-radius: 50%;
+            background: #1677ff; border: 3px solid #fff;
+            box-shadow: 0 0 0 2px #1677ff, 0 2px 8px rgba(0,0,0,.45);
+        }
+        @media (max-width: 700px) {
+            .app-container { grid-template-columns: 1fr; grid-template-rows: 56px minmax(0, 1fr) 190px; }
+            header { grid-column: 1; grid-row: 1; font-size: 17px; padding: 0 12px; }
+            #map { grid-column: 1; grid-row: 2; min-height: 0; }
+            #sidebar { display: none; }
+            #bottom-panel { grid-column: 1; grid-row: 3; padding: 8px 12px; }
+            .map-overlay { top: 8px; left: 8px; right: 8px; width: min(220px, calc(100% - 36px)); }
+        }
+
+        #sidebar { grid-column: 2 / 3; grid-row: 2 / 4; background-color: white; border-right: 1px solid #ddd; padding: 15px; overflow-y: auto; box-shadow: -2px 0 5px rgba(0,0,0,0.05); z-index: 2; }
+        .sidebar-section h3 { margin-top: 0; color: var(--primary-color); border-bottom: 2px solid var(--accent-color); padding-bottom: 5px; font-size: 16px; }
+        .point-item { background: var(--bg-color); padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #e0e0e0; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+        .point-info strong { display: block; color: #333; margin-bottom: 4px; font-size: 14px; }
+        .point-actions { display: flex; flex-direction: column; gap: 4px; margin-right: 10px; }
+        .btn-move { background: white; border: 1px solid #ccc; border-radius: 4px; color: #555; cursor: pointer; padding: 2px 8px; font-size: 12px; }
+        .btn-move:hover:not(:disabled) { background: var(--accent-color); color: white; border-color: var(--accent-color); }
+        .btn-move:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        #bottom-panel { grid-column: 1 / 2; grid-row: 3 / 4; background-color: white; border-top: 2px solid #ddd; padding: 10px 20px; z-index: 2; }
+        .chart-container { position: relative; height: 100%; width: 100%; }
+
+        .custom-marker { width: 20px; height: 20px; background-color: #e74c3c; border: 2px solid white; border-radius: 50%; cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .custom-marker:active { cursor: grabbing; }
+        .custom-marker { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: bold; width: 22px; height: 22px; }
+        .custom-marker.visited { background-color: #27ae60; }
+
+        /* פופאפ כניסה לבאפר של נקודה */
+        .poi-alert { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+        .poi-alert[hidden] { display: none; }
+        .poi-card { background: #fff; border-radius: 14px; padding: 22px 20px 18px; width: min(420px, 100%); box-shadow: 0 10px 30px rgba(0,0,0,.35); text-align: center; animation: poiPop .25s ease-out; }
+        .poi-num { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%; background: #e74c3c; color: #fff; font-size: 20px; font-weight: bold; margin-bottom: 10px; }
+        .poi-text { font-size: 21px; line-height: 1.45; color: #222; margin-bottom: 18px; }
+        .poi-card button { width: 100%; padding: 12px; font-size: 18px; border: none; border-radius: 8px; background: var(--primary-color); color: #fff; font-family: inherit; font-weight: bold; cursor: pointer; }
+        @keyframes poiPop { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>⛰️ טיול להר צפחות - תלת מימד (MapLibre)</header>
+
+        <div id="map">
+            <div class="map-overlay">
+                <label><b>סגנון מפה (תכסית):</b></label>
+                <select id="styleSelector" onchange="changeMapStyle(this.value)">
+                    <option value="topo">מפה טופוגרפית (OpenTopoMap)</option>
+                    <option value="sat">אורתופוטו משולב (Esri)</option>
+                </select>
+                <button id="toggle3dBtn" onclick="toggle3D()" style="margin-top:10px;">הפעל תלת מימד (תבליט)</button>
+                <button id="gpsBtn" onclick="startGPS()" style="margin-top:8px;">📍 הצג את המיקום שלי</button>
+                <div id="gpsStatus" role="status" aria-live="polite">המיקום שלך עדיין לא שותף.</div>
+            </div>
+        </div>
+
+        <div id="sidebar">
+            <div class="sidebar-section">
+                <h3>🟢 נקודת התחלה</h3>
+                <div id="points-start"></div>
+            </div>
+            <div class="sidebar-section">
+                <h3>🔵 נקודות לאורך המסלול</h3>
+                <div id="points-middle"></div>
+            </div>
+            <div class="sidebar-section">
+                <h3>🔴 נקודת סיום</h3>
+                <div id="points-end"></div>
+            </div>
+        </div>
+
+        <div id="bottom-panel">
+            <div class="chart-container">
+                <canvas id="elevationChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div id="poiAlert" class="poi-alert" hidden role="alertdialog" aria-live="assertive">
+        <div class="poi-card">
+            <div class="poi-num" id="poiNum"></div>
+            <div class="poi-text" id="poiText"></div>
+            <button onclick="closePoiAlert()">הבנתי</button>
+        </div>
+    </div>
+
+    <script>
+        // רשת ישראל החדשה (ITM)
+        proj4.defs('EPSG:2039', '+proj=tmerc +lat_0=31.7343936111111 +lon_0=35.2045169444444 +k=1.0000067 +x_0=219529.584 +y_0=626907.39 +ellps=GRS80 +towgs84=-24.0024,-17.1032,-17.8444,-0.33077,-1.85269,1.66969,5.4248 +units=m +no_defs');
+        const itmToWgs = (e, n) => proj4('EPSG:2039', 'EPSG:4326', [e, n]);
+        const wgsToItm = (lng, lat) => proj4('EPSG:4326', 'EPSG:2039', [lng, lat]);
+
+        // נקודות המסלול: מזרח, צפון (ITM), רדיוס באפר במטרים, תיאור
+        const ITM_POINTS = [
+            { e: 191957, n: 381092, buffer: 50, name: "התחלה" },
+            { e: 191118, n: 380851, buffer: 10, name: "תצפית, פסגה מדומה" },
+            { e: 190932, n: 380644, buffer: 10, name: "פסגת הר צפחות" },
+            { e: 190973, n: 380584, buffer: 10, name: "נק' חיבור שביל ישראל, הנצחה יוסי כהן" },
+            { e: 190995, n: 380512, buffer: 10, name: "פיצול עם שביל אדום" },
+            { e: 191075, n: 380374, buffer: 10, name: "פיצול מטעה, לקחת שמאלה לפני הסימון ולא לעקוף מאחורי האבן" },
+            { e: 191488, n: 380464, buffer: 10, name: "פיצול שביל אדום לבית ספר שדה (הירוק שביל ישראל)" },
+            { e: 191817, n: 380281, buffer: 10, name: "ספסל מנוחה" },
+            { e: 192002, n: 380391, buffer: 10, name: "סיום" }
+        ];
+
+        let waypoints = ITM_POINTS.map(p => {
+            const [lng, lat] = itmToWgs(p.e, p.n);
+            return { ...p, lng, lat, elevation: null, inside: false, visited: false };
+        });
+
+        let map, markers = [], is3D = false, elevationChart;
+
+        // אתחול מפת MapLibre עם מקורות חינמיים לחלוטין וללא צורך במפתח API
+        map = new maplibregl.Map({
+            container: 'map',
+            style: {
+                'version': 8,
+                'sources': {
+                    'topo-source': {
+                        'type': 'raster',
+                        'tiles': ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png'],
+                        'tileSize': 256,
+                        'attribution': '&copy; OpenStreetMap, OpenTopoMap'
+                    },
+                    'sat-source': {
+                        'type': 'raster',
+                        'tiles': ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+                        'tileSize': 256,
+                        'attribution': '&copy; Esri'
+                    },
+                    // מקור תבליט תלת מימדי חינמי של AWS Mapzen Terrarium
+                    'terrain-source': {
+                        'type': 'raster-dem',
+                        'tiles': ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+                        'encoding': 'terrarium',
+                        'tileSize': 256,
+                        'maxzoom': 14
+                    }
+                },
+                'layers': [
+                    {
+                        'id': 'topo-layer',
+                        'type': 'raster',
+                        'source': 'topo-source',
+                        'layout': { 'visibility': 'visible' }
+                    },
+                    {
+                        'id': 'sat-layer',
+                        'type': 'raster',
+                        'source': 'sat-source',
+                        'layout': { 'visibility': 'none' }
+                    }
+                ]
+            },
+            center: [waypoints[2].lng, waypoints[2].lat], // הר צפחות
+            zoom: 15.5,
+            pitch: 0
+        });
+
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+        map.on('load', () => {
+            map.addSource('buffers', { type: 'geojson', data: buffersGeoJSON() });
+            map.addLayer({ id: 'buffers-fill', type: 'fill', source: 'buffers',
+                paint: { 'fill-color': '#f39c12', 'fill-opacity': 0.18 } });
+            map.addLayer({ id: 'buffers-line', type: 'line', source: 'buffers',
+                paint: { 'line-color': '#e67e22', 'line-width': 1.5 } });
+
+            drawRouteAndMarkers();
+
+            const b = new maplibregl.LngLatBounds();
+            waypoints.forEach(wp => b.extend([wp.lng, wp.lat]));
+            map.fitBounds(b, { padding: 50, duration: 0 });
+
+            loadAllElevations();
+
+            // מצב סימולציה לבדיקה מהבית: הוסף ?sim=1 לכתובת ולחץ על המפה כדי "להזיז" את הטלפון
+            if (new URLSearchParams(location.search).has('sim')) {
+                setGPSStatus('מצב סימולציה: לחץ על המפה כדי לדמות מיקום.');
+                map.on('click', e => {
+                    unlockAudio();
+                    updateUserLocation({ coords: { longitude: e.lngLat.lng, latitude: e.lngLat.lat, accuracy: 5 } });
+                });
+            }
+        });
+
+        function buffersGeoJSON() {
+            return {
+                type: 'FeatureCollection',
+                features: waypoints.map(wp => makeAccuracyCircle(wp.lng, wp.lat, wp.buffer))
+            };
+        }
+        function updateBuffers() {
+            if (map.getSource('buffers')) map.getSource('buffers').setData(buffersGeoJSON());
+        }
+
+        // ---- גובה אמיתי ממודל הגבהים (Terrarium) במקום פונקציית הדמה ----
+        const demTileCache = {};
+        function getDemTile(z, x, y) {
+            const key = `${z}/${x}/${y}`;
+            if (!demTileCache[key]) {
+                demTileCache[key] = fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${key}.png`)
+                    .then(r => r.blob())
+                    .then(createImageBitmap)
+                    .then(img => {
+                        const c = document.createElement('canvas');
+                        c.width = img.width; c.height = img.height;
+                        const ctx = c.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        return ctx.getImageData(0, 0, c.width, c.height);
+                    });
+            }
+            return demTileCache[key];
+        }
+        async function getElevation(lat, lng) {
+            const z = 14, n = 2 ** z;
+            const xf = (lng + 180) / 360 * n;
+            const latRad = lat * Math.PI / 180;
+            const yf = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
+            const x = Math.floor(xf), y = Math.floor(yf);
+            const img = await getDemTile(z, x, y);
+            const px = Math.min(img.width - 1, Math.floor((xf - x) * img.width));
+            const py = Math.min(img.height - 1, Math.floor((yf - y) * img.height));
+            const i = (py * img.width + px) * 4;
+            const d = img.data;
+            return Math.round(d[i] * 256 + d[i + 1] + d[i + 2] / 256 - 32768);
+        }
+        async function loadAllElevations() {
+            await Promise.all(waypoints.map(async wp => {
+                try { wp.elevation = await getElevation(wp.lat, wp.lng); } catch (e) { wp.elevation = null; }
+            }));
+            updateSidebar();
+            updateChartData();
+        }
+
+        // פונקציות החלפת תצוגה
+        function changeMapStyle(styleType) {
+            if (styleType === 'topo') {
+                map.setLayoutProperty('topo-layer', 'visibility', 'visible');
+                map.setLayoutProperty('sat-layer', 'visibility', 'none');
+            } else {
+                map.setLayoutProperty('topo-layer', 'visibility', 'none');
+                map.setLayoutProperty('sat-layer', 'visibility', 'visible');
+            }
+        }
+
+        function toggle3D() {
+            is3D = !is3D;
+            const btn = document.getElementById('toggle3dBtn');
+            
+            if (is3D) {
+                map.setTerrain({ 'source': 'terrain-source', 'exaggeration': 1.5 });
+                map.easeTo({ pitch: 65, bearing: 45, duration: 1500 });
+                btn.style.backgroundColor = 'var(--accent-color)';
+                btn.innerText = 'כבוי תלת מימד';
+            } else {
+                map.setTerrain(null);
+                map.easeTo({ pitch: 0, bearing: 0, duration: 1500 });
+                btn.style.backgroundColor = 'var(--primary-color)';
+                btn.innerText = 'הפעל תלת מימד (תבליט)';
+            }
+        }
+
+        // ציור המסלול והסמנים
+        function drawRouteAndMarkers() {
+            markers.forEach(m => m.remove());
+            markers = [];
+            if (map.getLayer('route')) map.removeLayer('route');
+            if (map.getSource('route')) map.removeSource('route');
+
+            const coordinates = waypoints.map(wp => [wp.lng, wp.lat]);
+            map.addSource('route', {
+                'type': 'geojson',
+                'data': { 'type': 'Feature', 'properties': {}, 'geometry': { 'type': 'LineString', 'coordinates': coordinates } }
+            });
+            map.addLayer({
+                'id': 'route', 'type': 'line', 'source': 'route',
+                'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                'paint': { 'line-color': '#e74c3c', 'line-width': 4, 'line-dasharray': [2, 2] }
+            });
+
+            waypoints.forEach((wp, index) => {
+                const el = document.createElement('div');
+                el.className = 'custom-marker' + (wp.visited ? ' visited' : '');
+                el.textContent = index + 1;
+
+                const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`<b>${index + 1}. ${wp.name}</b>`);
+
+                const marker = new maplibregl.Marker({ element: el, draggable: true })
+                    .setLngLat([wp.lng, wp.lat])
+                    .setPopup(popup)
+                    .addTo(map);
+
+                marker.on('dragend', async () => {
+                    const lngLat = marker.getLngLat();
+                    const p = waypoints[index];
+                    p.lng = lngLat.lng;
+                    p.lat = lngLat.lat;
+                    [p.e, p.n] = wgsToItm(p.lng, p.lat).map(Math.round);
+                    try { p.elevation = await getElevation(p.lat, p.lng); } catch (e) { p.elevation = null; }
+
+                    updateRouteLine();
+                    updateBuffers();
+                    updateSidebar();
+                    updateChartData();
+                });
+
+                markers.push(marker);
+            });
+
+            updateBuffers();
+            updateSidebar();
+            initOrUpdateChart();
+        }
+
+        function updateRouteLine() {
+            const coordinates = waypoints.map(wp => [wp.lng, wp.lat]);
+            map.getSource('route').setData({ 'type': 'Feature', 'properties': {}, 'geometry': { 'type': 'LineString', 'coordinates': coordinates } });
+        }
+
+        function movePoint(index, direction) {
+            if (index + direction < 0 || index + direction >= waypoints.length) return;
+            const temp = waypoints[index];
+            waypoints[index] = waypoints[index + direction];
+            waypoints[index + direction] = temp;
+            drawRouteAndMarkers();
+        }
+
+        function updateSidebar() {
+            const startC = document.getElementById('points-start');
+            const midC = document.getElementById('points-middle');
+            const endC = document.getElementById('points-end');
+            startC.innerHTML = ''; midC.innerHTML = ''; endC.innerHTML = '';
+
+            waypoints.forEach((wp, index) => {
+                const upDisabled = index === 0 ? 'disabled' : '';
+                const downDisabled = index === waypoints.length - 1 ? 'disabled' : '';
+                const html = `
+                    <div class="point-item">
+                        <div class="point-info">
+                            <strong>${index + 1}. ${wp.name}</strong>
+                            גובה: ${wp.elevation == null ? '...' : '~' + wp.elevation + " מ'"} | באפר: ${wp.buffer} מ'<br>
+                            ITM: ${wp.e} / ${wp.n}
+                        </div>
+                        <div class="point-actions">
+                            <button class="btn-move" onclick="movePoint(${index}, -1)" ${upDisabled} title="מעלה">▲</button>
+                            <button class="btn-move" onclick="movePoint(${index}, 1)" ${downDisabled} title="מטה">▼</button>
+                        </div>
+                    </div>
+                `;
+                if (index === 0) startC.innerHTML += html;
+                else if (index === waypoints.length - 1) endC.innerHTML += html;
+                else midC.innerHTML += html;
+            });
+        }
+
+        function initOrUpdateChart() {
+            const labels = waypoints.map((wp, i) => `${i+1}. ${wp.name.length > 18 ? wp.name.slice(0, 18) + '…' : wp.name}`);
+            const data = waypoints.map(wp => wp.elevation);
+
+            if (!elevationChart) {
+                const ctx = document.getElementById('elevationChart').getContext('2d');
+                elevationChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{ label: 'חתך גבהים', data: data, borderColor: '#2c3e50', backgroundColor: 'rgba(52, 152, 219, 0.2)', borderWidth: 2, fill: true }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { beginAtZero: true, suggestedMax: 300 } },
+                        elements: { line: { tension: 0.4 }, point: { radius: 4, hoverRadius: 6, backgroundColor: '#e74c3c' } }
+                    }
+                });
+            } else {
+                elevationChart.data.labels = labels;
+                elevationChart.data.datasets[0].data = data;
+                elevationChart.update();
+            }
+        }
+        function updateChartData() { initOrUpdateChart(); }
+
+
+        // מיקום GPS של המשתמש: נשאר בדפדפן ואינו נשלח לשרת.
+        let gpsWatchId = null;
+        let userLocationMarker = null;
+        let userAccuracyCircle = null;
+        let hasCenteredOnUser = false;
+
+        function setGPSStatus(message) {
+            const status = document.getElementById('gpsStatus');
+            if (status) status.textContent = message;
+        }
+
+        function startGPS() {
+            if (!('geolocation' in navigator)) {
+                setGPSStatus('הדפדפן הזה אינו תומך בקבלת מיקום GPS.');
+                return;
+            }
+
+            if (!window.isSecureContext) {
+                setGPSStatus('כדי לקבל GPS יש לפתוח את הדף דרך אתר מאובטח (HTTPS).');
+                return;
+            }
+
+            // הלחיצה על הכפתור היא המחווה שמאפשרת לטלפון להשמיע צליל בהמשך
+            unlockAudio();
+            requestWakeLock();
+
+            const button = document.getElementById('gpsBtn');
+            button.disabled = true;
+            button.textContent = 'ממתין לאישור מיקום...';
+            setGPSStatus('נא לאשר לדפדפן גישה למיקום שלך.');
+
+            // מבקשים מיקום ראשון; הדפדפן יציג בקשת הרשאה אם טרם ניתנה.
+            navigator.geolocation.getCurrentPosition(
+                position => {
+                    updateUserLocation(position);
+                    button.disabled = false;
+                    button.textContent = '📍 עדכן את המיקום שלי';
+                    setGPSStatus('המיקום התקבל. המיקום שלך מוצג במפה ומתעדכן בזמן אמת.');
+                    if (gpsWatchId === null) {
+                        gpsWatchId = navigator.geolocation.watchPosition(
+                            updateUserLocation,
+                            handleGPSError,
+                            {
+                                enableHighAccuracy: true,
+                                maximumAge: 3000,
+                                timeout: 20000
+                            }
+                        );
+                    }
+                },
+                error => {
+                    button.disabled = false;
+                    button.textContent = '📍 נסה שוב לקבלת מיקום';
+                    handleGPSError(error);
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 20000
+                }
+            );
+        }
+
+        function updateUserLocation(position) {
+            const lng = position.coords.longitude;
+            const lat = position.coords.latitude;
+            const accuracy = position.coords.accuracy;
+
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                setGPSStatus('לא התקבל מיקום תקין מהמכשיר.');
+                return;
+            }
+
+            const point = [lng, lat];
+
+            if (!userLocationMarker) {
+                const el = document.createElement('div');
+                el.className = 'user-location-marker';
+                userLocationMarker = new maplibregl.Marker({ element: el })
+                    .setLngLat(point)
+                    .setPopup(new maplibregl.Popup({ offset: 18 }).setText('המיקום הנוכחי שלך'))
+                    .addTo(map);
+            } else {
+                userLocationMarker.setLngLat(point);
+            }
+
+            // מעגל המציג בקירוב את דיוק המדידה שהתקבל מהטלפון.
+            const circleFeature = makeAccuracyCircle(lng, lat, Math.max(accuracy || 0, 5));
+            if (!map.getSource('user-accuracy')) {
+                map.addSource('user-accuracy', {
+                    type: 'geojson',
+                    data: circleFeature
+                });
+                map.addLayer({
+                    id: 'user-accuracy-fill',
+                    type: 'fill',
+                    source: 'user-accuracy',
+                    paint: {
+                        'fill-color': '#1677ff',
+                        'fill-opacity': 0.12
+                    }
+                });
+                map.addLayer({
+                    id: 'user-accuracy-outline',
+                    type: 'line',
+                    source: 'user-accuracy',
+                    paint: {
+                        'line-color': '#1677ff',
+                        'line-width': 1.5,
+                        'line-opacity': 0.65
+                    }
+                });
+            } else {
+                map.getSource('user-accuracy').setData(circleFeature);
+            }
+
+            if (!hasCenteredOnUser) {
+                map.easeTo({ center: point, zoom: 16, duration: 1000 });
+                hasCenteredOnUser = true;
+            }
+
+            const [e, n] = wgsToItm(lng, lat).map(Math.round);
+            setGPSStatus(
+                `המיקום שלך מוצג בכחול. דיוק משוער: ${Math.round(accuracy)} מטר. ` +
+                `ITM: ${e} / ${n}`
+            );
+
+            checkProximity(lat, lng);
+        }
+
+        // ---- זיהוי כניסה לבאפר של נקודה ----
+        function distanceMeters(lat1, lng1, lat2, lng2) {
+            const R = 6371008.8, toRad = Math.PI / 180;
+            const dLat = (lat2 - lat1) * toRad, dLng = (lng2 - lng1) * toRad;
+            const a = Math.sin(dLat / 2) ** 2 +
+                      Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLng / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(a));
+        }
+
+        function checkProximity(lat, lng) {
+            waypoints.forEach((wp, index) => {
+                const d = distanceMeters(lat, lng, wp.lat, wp.lng);
+                if (!wp.inside && d <= wp.buffer) {
+                    wp.inside = true;
+                    if (!wp.visited) {
+                        wp.visited = true;
+                        if (markers[index]) markers[index].getElement().classList.add('visited');
+                    }
+                    queuePoiAlert(index);
+                } else if (wp.inside && d > wp.buffer + Math.max(5, wp.buffer * 0.5)) {
+                    // יציאה עם מרווח, כדי שקפיצות GPS על הגבול לא יקפיצו את ההתראה שוב ושוב
+                    wp.inside = false;
+                }
+            });
+        }
+
+        const poiQueue = [];
+        function queuePoiAlert(index) {
+            poiQueue.push(index);
+            if (document.getElementById('poiAlert').hidden) showNextPoiAlert();
+        }
+        function showNextPoiAlert() {
+            if (!poiQueue.length) return;
+            const index = poiQueue.shift();
+            document.getElementById('poiNum').textContent = index + 1;
+            document.getElementById('poiText').textContent = waypoints[index].name;
+            document.getElementById('poiAlert').hidden = false;
+            playAlertSound();
+            if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+        }
+        function closePoiAlert() {
+            document.getElementById('poiAlert').hidden = true;
+            showNextPoiAlert();
+        }
+
+        // ---- צליל ----
+        let audioCtx = null;
+        function unlockAudio() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                // צליל שקט קצר בתוך המחווה, נדרש ב-iOS כדי "לפתוח" את השמע
+                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                g.gain.value = 0.0001;
+                o.connect(g).connect(audioCtx.destination);
+                o.start(); o.stop(audioCtx.currentTime + 0.05);
+            } catch (e) { /* אין תמיכה בשמע */ }
+        }
+        function playAlertSound() {
+            if (!audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const t0 = audioCtx.currentTime;
+            [880, 1175, 880, 1175].forEach((freq, i) => {
+                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                o.type = 'sine';
+                o.frequency.value = freq;
+                const t = t0 + i * 0.22;
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+                o.connect(g).connect(audioCtx.destination);
+                o.start(t); o.stop(t + 0.21);
+            });
+        }
+
+        // ---- מניעת כיבוי מסך (אם המסך כבה, הדפדפן מפסיק לקבל GPS) ----
+        let wakeLock = null;
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+            } catch (e) { /* לא נתמך / נדחה */ }
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && gpsWatchId !== null) requestWakeLock();
+        });
+
+        function makeAccuracyCircle(lng, lat, radiusMeters) {
+            const coordinates = [];
+            const earthRadius = 6371008.8;
+            const latRad = lat * Math.PI / 180;
+            for (let i = 0; i <= 64; i++) {
+                const bearing = (i / 64) * 2 * Math.PI;
+                const angularDistance = radiusMeters / earthRadius;
+                const lat2 = Math.asin(
+                    Math.sin(latRad) * Math.cos(angularDistance) +
+                    Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearing)
+                );
+                const lng2 = lng * Math.PI / 180 + Math.atan2(
+                    Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latRad),
+                    Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(lat2)
+                );
+                coordinates.push([lng2 * 180 / Math.PI, lat2 * 180 / Math.PI]);
+            }
+            return {
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'Polygon', coordinates: [coordinates] }
+            };
+        }
+
+        function handleGPSError(error) {
+            let message = 'לא ניתן לקבל את המיקום כרגע.';
+            if (error && error.code === 1) {
+                message = 'הגישה למיקום נדחתה. יש לאפשר הרשאת מיקום בהגדרות הדפדפן.';
+            } else if (error && error.code === 2) {
+                message = 'המיקום אינו זמין. בדוק שה-GPS פעיל ונסה שוב במקום פתוח.';
+            } else if (error && error.code === 3) {
+                message = 'קבלת המיקום ארכה זמן רב מדי. אפשר לנסות שוב.';
+            }
+            setGPSStatus(message);
+        }
+
+    </script>
+</body>
+</html>
