@@ -38,7 +38,9 @@
         }
         @media (max-width: 700px) {
             .app-container { grid-template-columns: 1fr; grid-template-rows: 56px minmax(0, 1fr) 190px; }
-            header { grid-column: 1; grid-row: 1; font-size: 17px; padding: 0 12px; }
+            header { grid-column: 1; grid-row: 1; font-size: 16px; line-height: 1.25; padding: 0 12px; overflow: hidden; }
+            header .hdr-sub { display: block; font-size: 13px; font-weight: normal; opacity: .85; }
+            header .hdr-sep { display: none; }
             #map { grid-column: 1; grid-row: 2; min-height: 0; }
             #sidebar { display: none; }
             #bottom-panel { grid-column: 1; grid-row: 3; padding: 8px 12px; }
@@ -78,7 +80,7 @@
 </head>
 <body>
     <div class="app-container">
-        <header>⛰️ טיול להר צפחות - תלת מימד מינהל התכנון</header>
+        <header><div>⛰️ טיול להר צפחות<span class="hdr-sep"> - </span><span class="hdr-sub">תלת מימד מינהל התכנון</span></div></header>
 
         <div id="map">
             <div class="map-overlay" id="mapPanel">
