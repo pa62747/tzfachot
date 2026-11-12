@@ -22,7 +22,10 @@
         header { grid-column: 1 / 3; grid-row: 1 / 2; background-color: var(--primary-color); color: white; display: flex; align-items: center; padding: 0 20px; font-size: 24px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 10; }
         #map { grid-column: 1 / 2; grid-row: 2 / 3; z-index: 1; position: relative; }
         
-        .map-overlay { position: absolute; top: 10px; left: 10px; background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 4px; z-index: 5; box-shadow: 0 1px 4px rgba(0,0,0,0.3); font-size: 14px; }
+        .map-overlay { position: absolute; top: 10px; left: 10px; width: 230px; box-sizing: border-box; background: rgba(255, 255, 255, 0.95); padding: 10px; border-radius: 4px; z-index: 5; box-shadow: 0 1px 4px rgba(0,0,0,0.3); font-size: 14px; transition: transform .3s ease; }
+        /* מגירה: נעלמת שמאלה, הלשונית נשארת בקצה המפה */
+        .map-overlay.collapsed { transform: translateX(calc(-100% - 10px)); box-shadow: none; }
+        .map-overlay .panel-tab { position: absolute; top: 0; left: 100%; width: 34px !important; height: 44px; margin: 0 !important; padding: 0 !important; border-radius: 0 6px 6px 0 !important; background: var(--primary-color); color: #fff; font-size: 18px; box-shadow: 2px 1px 4px rgba(0,0,0,0.3); }
         .map-overlay select, .map-overlay button { margin-top: 5px; padding: 5px; width: 100%; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-family: inherit;}
         .map-overlay button { background: var(--primary-color); color: white; border: none; font-weight: bold;}
         .map-overlay button:hover { background: var(--accent-color); }
@@ -39,7 +42,8 @@
             #map { grid-column: 1; grid-row: 2; min-height: 0; }
             #sidebar { display: none; }
             #bottom-panel { grid-column: 1; grid-row: 3; padding: 8px 12px; }
-            .map-overlay { top: 8px; left: 8px; right: 8px; width: min(220px, calc(100% - 36px)); }
+            .map-overlay { top: 8px; left: 8px; width: min(220px, calc(100% - 60px)); }
+            .map-overlay.collapsed { transform: translateX(calc(-100% - 8px)); }
         }
 
         #sidebar { grid-column: 2 / 3; grid-row: 2 / 4; background-color: white; border-right: 1px solid #ddd; padding: 15px; overflow-y: auto; box-shadow: -2px 0 5px rgba(0,0,0,0.05); z-index: 2; }
@@ -77,7 +81,8 @@
         <header>⛰️ טיול להר צפחות - תלת מימד מינהל התכנון</header>
 
         <div id="map">
-            <div class="map-overlay">
+            <div class="map-overlay" id="mapPanel">
+                <button class="panel-tab" id="panelTab" onclick="togglePanel()" aria-controls="mapPanel" aria-expanded="true" title="הסתר את התפריט">◀</button>
                 <label><b>סגנון מפה (תכסית):</b></label>
                 <select id="styleSelector" onchange="changeMapStyle(this.value)">
                     <option value="topo">מפה טופוגרפית (OpenTopoMap)</option>
@@ -425,6 +430,17 @@
         let userLocationMarker = null;
         let userAccuracyCircle = null;
         let hasCenteredOnUser = false;
+
+        function togglePanel(forceCollapsed) {
+            const panel = document.getElementById('mapPanel');
+            const tab = document.getElementById('panelTab');
+            const collapsed = panel.classList.toggle('collapsed', forceCollapsed);
+            tab.textContent = collapsed ? '☰' : '◀';
+            tab.title = collapsed ? 'הצג את התפריט' : 'הסתר את התפריט';
+            tab.setAttribute('aria-expanded', String(!collapsed));
+        }
+        // בטלפון התפריט מתחיל סגור כדי לא להסתיר את המפה
+        if (window.matchMedia('(max-width: 700px)').matches) togglePanel(true);
 
         function setGPSStatus(message) {
             const status = document.getElementById('gpsStatus');
